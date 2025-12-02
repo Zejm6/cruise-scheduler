@@ -1,55 +1,201 @@
-from fastapi import FastAPI, Depends, Query
-from datetime import date
-from dotenv import load_dotenv
-from sqlalchemy import select, and_
-from sqlalchemy.ext.asyncio import AsyncSession
-from .db import init_db, async_session
-from .schemas import OptimizeRequest, OptimizeResponse, ScheduledItem
-from .optimizer import solve_schedule_stub, persist_schedule
-from .models import Schedule, Port
+from typing import List
 
-load_dotenv()
-app = FastAPI(title="Cruise Scheduler API", version="0.2.0")
+from fastapi import FastAPI, Depends, HTTPException, Response
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, delete
+
+from .db import get_session, init_db
+from .models import Port, Ship, CruiseRequest, RuleSet
+from .schemas import (
+    PortCreate,
+    PortRead,
+    ShipCreate,
+    ShipRead,
+    ShipUpdate,
+    CruiseRequestRead,
+    OptimizeRequest,
+    OptimizeResponse,
+    RuleSetRead,
+    RuleSetUpdate,
+)
+from .optimizer import solve_schedule_ilp
+
+
+app = FastAPI(title="Cruise Scheduler API")
+
+# CORS – za tvoj frontend na localhost:5173
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 @app.on_event("startup")
 async def on_startup():
+    # kreira tabele ako ne postoje
     await init_db()
+
 
 @app.get("/health")
 async def health():
     return {"ok": True}
 
-@app.post("/optimize", response_model=OptimizeResponse)
-async def optimize(payload: OptimizeRequest, session: AsyncSession = Depends(async_session)):
-    result = await solve_schedule_stub(session, payload)
-    return result
 
-@app.post("/optimize-and-save", response_model=OptimizeResponse)
-async def optimize_and_save(payload: OptimizeRequest, session: AsyncSession = Depends(async_session)):
-    result = await solve_schedule_stub(session, payload)
-    await persist_schedule(session, result.schedule)
-    return result
+# ---------------------------
+# PORTS
+# ---------------------------
 
-@app.get("/schedule", response_model=list[ScheduledItem])
-async def get_schedule(
-    from_date: date | None = Query(None, alias="from"),
-    to_date: date | None = Query(None, alias="to"),
-    port: str | None = None,
-    session: AsyncSession = Depends(async_session),
-):
-    stmt = (
-        select(Schedule.request_id, Schedule.call_date, Port.name)
-        .join(Port, Port.id == Schedule.port_id)
+@app.get("/ports", response_model=List[PortRead])
+async def list_ports(session: AsyncSession = Depends(get_session)):
+    result = await session.execute(select(Port))
+    return result.scalars().all()
+
+
+@app.post("/ports", response_model=PortRead)
+async def create_port(payload: PortCreate, session: AsyncSession = Depends(get_session)):
+    port = Port(
+        name=payload.name,
+        max_berths=payload.max_berths,
+        daily_pax_capacity=payload.daily_pax_capacity,
+        max_ship_length_m=payload.max_ship_length_m,
+        max_draft_m=payload.max_draft_m,
     )
-    conds = []
-    if from_date:
-        conds.append(Schedule.call_date >= from_date)
-    if to_date:
-        conds.append(Schedule.call_date <= to_date)
-    if port:
-        conds.append(Port.name == port)
-    if conds:
-        stmt = stmt.where(and_(*conds))
+    session.add(port)
+    await session.commit()
+    await session.refresh(port)
+    return port
 
-    rows = (await session.execute(stmt)).all()
-    return [ScheduledItem(request_id=r[0], call_date=r[1], port=r[2]) for r in rows]
+
+# ---------------------------
+# SHIPS
+# ---------------------------
+
+@app.get("/ships", response_model=List[ShipRead])
+async def list_ships(session: AsyncSession = Depends(get_session)):
+    result = await session.execute(select(Ship))
+    return result.scalars().all()
+
+
+@app.post("/ships", response_model=ShipRead)
+async def create_ship(payload: ShipCreate, session: AsyncSession = Depends(get_session)):
+    ship = Ship(
+        name=payload.name,
+        length_m=payload.length_m,
+        draft_m=payload.draft_m,
+        pax_capacity=payload.pax_capacity,
+    )
+    session.add(ship)
+    await session.commit()
+    await session.refresh(ship)
+    return ship
+
+
+@app.patch("/ships/{ship_id}", response_model=ShipRead)
+async def update_ship(
+    ship_id: int,
+    payload: ShipUpdate,
+    session: AsyncSession = Depends(get_session),
+):
+    ship = await session.get(Ship, ship_id)
+    if not ship:
+        raise HTTPException(status_code=404, detail="Ship not found")
+
+    data = payload.model_dump(exclude_unset=True)
+    for field, value in data.items():
+        setattr(ship, field, value)
+
+    await session.commit()
+    await session.refresh(ship)
+    return ship
+
+
+@app.delete("/ships/{ship_id}", status_code=204)
+async def delete_ship(
+    ship_id: int,
+    session: AsyncSession = Depends(get_session),
+):
+    # prvo izbriši sve zahtjeve za ovaj brod
+    await session.execute(
+        delete(CruiseRequest).where(CruiseRequest.ship_id == ship_id)
+    )
+
+    ship = await session.get(Ship, ship_id)
+    if not ship:
+        # ako nema broda, vrati 404
+        raise HTTPException(status_code=404, detail="Ship not found")
+
+    await session.delete(ship)
+    await session.commit()
+
+    # 204 No Content
+    return Response(status_code=204)
+
+
+# ---------------------------
+# CRUISE REQUESTS (read-only za sada)
+# ---------------------------
+
+@app.get("/requests", response_model=List[CruiseRequestRead])
+async def list_requests(session: AsyncSession = Depends(get_session)):
+    result = await session.execute(select(CruiseRequest))
+    return result.scalars().all()
+
+
+# ---------------------------
+# RULESET
+# ---------------------------
+
+@app.get("/rules", response_model=RuleSetRead)
+async def get_rules(session: AsyncSession = Depends(get_session)):
+    result = await session.execute(select(RuleSet))
+    ruleset = result.scalars().first()
+
+    if not ruleset:
+        # ako nema zapisa, kreiraj default
+        ruleset = RuleSet(
+            allow_oversize_ships=True,
+            allow_draft_exceed=False,
+            enforce_daily_pax_capacity=True,
+            allow_multiple_ships_per_berth=False,
+        )
+        session.add(ruleset)
+        await session.commit()
+        await session.refresh(ruleset)
+
+    return ruleset
+
+
+@app.patch("/rules", response_model=RuleSetRead)
+async def update_rules(
+    payload: RuleSetUpdate,
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(select(RuleSet))
+    ruleset = result.scalars().first()
+
+    if not ruleset:
+        raise HTTPException(status_code=404, detail="Ruleset not found")
+
+    data = payload.model_dump(exclude_unset=True)
+    for field, value in data.items():
+        setattr(ruleset, field, value)
+
+    await session.commit()
+    await session.refresh(ruleset)
+    return ruleset
+
+
+# ---------------------------
+# OPTIMIZER
+# ---------------------------
+
+@app.post("/optimize-ilp", response_model=OptimizeResponse)
+async def optimize(
+    payload: OptimizeRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    return await solve_schedule_ilp(session, payload)

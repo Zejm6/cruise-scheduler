@@ -1,43 +1,66 @@
 from datetime import timedelta
-from sqlalchemy import select, update
+from typing import List
+
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from .models import Port, CallRequest, Schedule
-from .schemas import OptimizeRequest, OptimizeResponse, ScheduledItem, KPIs
 
-async def solve_schedule_stub(session: AsyncSession, payload: OptimizeRequest) -> OptimizeResponse:
-    ports = {p.name: p for p in (await session.execute(select(Port))).scalars().all()}
-    if "Kotor" not in ports or "Bar" not in ports:
-        raise RuntimeError("Ports 'Kotor' and 'Bar' must exist; run seed.")
-    calls = (await session.execute(select(CallRequest))).scalars().all()
+from .models import CruiseRequest, Port
+from .schemas import OptimizeRequest, OptimizeResponse, ScheduleEntry
 
-    out: list[ScheduledItem] = []
-    cur_day = payload.date_range.start
-    for r in calls:
-        big = (r.pax_expected or 0) >= 3500
-        port = "Bar" if big else "Kotor"
-        d = r.eta_earliest if cur_day < r.eta_earliest else cur_day
-        if d > r.eta_latest:
-            d = r.eta_latest
-        out.append(ScheduledItem(request_id=r.id, port=port, call_date=d))
-        cur_day = d + timedelta(days=1)
 
-    return OptimizeResponse(
-        schedule=out,
-        kpis=KPIs(kotor_share=None, max_daily_pax=None, violations=0)
-    )
+async def solve_schedule_ilp(
+    db: AsyncSession,
+    payload: OptimizeRequest,
+) -> OptimizeResponse:
+    """
+    Jednostavan 'fake' optimizator:
+    - uzme sve zahtjeve iz baze
+    - uzme sve luke
+    - napravi listu dana u zadatom opsegu
+    - kružno rasporedi zahtjeve po danima i lukama
+    """
 
-async def persist_schedule(session: AsyncSession, items: list[ScheduledItem]) -> None:
-    # mapiraj nazive luka u id
-    ports = {p.name: p.id for p in (await session.execute(select(Port))).scalars().all()}
-    for it in items:
-        port_id = ports[it.port]
-        # upsert po request_id
-        existing = (await session.execute(
-            select(Schedule).where(Schedule.request_id == it.request_id)
-        )).scalars().first()
-        if existing:
-            existing.port_id = port_id
-            existing.call_date = it.call_date
-        else:
-            session.add(Schedule(request_id=it.request_id, port_id=port_id, call_date=it.call_date))
-    await session.commit()
+    # payload.date_range je DateRange objekat (nije dict!)
+    start = payload.date_range.start
+    end = payload.date_range.end
+
+    # Lista svih dana u opsegu [start, end]
+    days: List = []
+    d = start
+    while d <= end:
+        days.append(d)
+        d += timedelta(days=1)
+
+    # Učitamo sve zahtjeve i luke iz baze
+    result = await db.execute(select(CruiseRequest))
+    requests = result.scalars().all()
+
+    result = await db.execute(select(Port))
+    ports = result.scalars().all()
+
+    # Ako nema podataka, vrati prazan raspored
+    if not requests or not ports or not days:
+        return OptimizeResponse(schedule=[])
+
+    schedule_entries: List[ScheduleEntry] = []
+
+    port_index = 0
+    day_index = 0
+
+    for req in requests:
+        day = days[day_index]
+        port = ports[port_index]
+
+        schedule_entries.append(
+            ScheduleEntry(
+                request_id=req.id,
+                port_id=port.id,
+                date=day,
+            )
+        )
+
+        # kružno pomjeranje po danima i lukama
+        day_index = (day_index + 1) % len(days)
+        port_index = (port_index + 1) % len(ports)
+
+    return OptimizeResponse(schedule=schedule_entries)
