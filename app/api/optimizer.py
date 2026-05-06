@@ -18,9 +18,10 @@ async def solve_schedule_ilp(
     - uzme sve luke
     - napravi listu dana u zadatom opsegu
     - kružno rasporedi zahtjeve po danima i lukama
+    - vrati i dummy KPIs da zadovolji schema-u
     """
 
-    # payload.date_range je DateRange objekat (nije dict!)
+    # payload.date_range je objekat sa .start i .end
     start = payload.date_range.start
     end = payload.date_range.end
 
@@ -38,9 +39,16 @@ async def solve_schedule_ilp(
     result = await db.execute(select(Port))
     ports = result.scalars().all()
 
-    # Ako nema podataka, vrati prazan raspored
+    # Ako nema podataka, vrati prazan raspored + dummy KPIs
     if not requests or not ports or not days:
-        return OptimizeResponse(schedule=[])
+        return OptimizeResponse(
+            schedule=[],
+            kpis={
+                "kotor_share": None,
+                "max_daily_pax": None,
+                "violations": 0,
+            },
+        )
 
     schedule_entries: List[ScheduleEntry] = []
 
@@ -51,11 +59,16 @@ async def solve_schedule_ilp(
         day = days[day_index]
         port = ports[port_index]
 
+        # VAŽNO:
+        # ScheduleEntry u schemama/frontendu očekuje:
+        #   request_id: int
+        #   port: str (ime luke)
+        #   call_date: date
         schedule_entries.append(
             ScheduleEntry(
                 request_id=req.id,
-                port_id=port.id,
-                date=day,
+                port=port.name,
+                call_date=day,
             )
         )
 
@@ -63,4 +76,14 @@ async def solve_schedule_ilp(
         day_index = (day_index + 1) % len(days)
         port_index = (port_index + 1) % len(ports)
 
-    return OptimizeResponse(schedule=schedule_entries)
+    # Dummy KPIs – samo da API bude konzistentan sa frontendom/schemama
+    kpis = {
+        "kotor_share": None,   # ovdje bi išao pravi proračun
+        "max_daily_pax": None, # ovdje max pax po danu
+        "violations": 0,       # broj prekršenih ograničenja
+    }
+
+    return OptimizeResponse(
+        schedule=schedule_entries,
+        kpis=kpis,
+    )

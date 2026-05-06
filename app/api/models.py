@@ -44,11 +44,10 @@ class CruiseRequest(Base):
     eta_earliest = Column(Date, nullable=False)
     eta_latest = Column(Date, nullable=False)
 
-    preferred_port = Column(Integer, ForeignKey("ports.id"), nullable=True)
+    preferred_port = Column(String, nullable=True)
     priority = Column(Integer, nullable=False, default=1)
 
     ship = relationship("Ship", back_populates="requests")
-    port = relationship("Port")
 
 
 class RuleSet(Base):
@@ -56,9 +55,9 @@ class RuleSet(Base):
 
     id = Column(Integer, primary_key=True, index=True)
 
-    # polja koja frontend šalje:
-    kotor_target_share = Column(Float, nullable=False)
-    big_ship_length_threshold = Column(Float, nullable=False)
-    big_ship_pax_threshold = Column(Integer, nullable=False)
+    kotor_target_share = Column(Float, nullable=False, default=0.85)
+    big_ship_length_threshold = Column(Float, nullable=False, default=300.0)
+    big_ship_pax_threshold = Column(Integer, nullable=False, default=3000)
     bar_big_ship_mandatory = Column(Boolean, nullable=False, default=True)
-    max_calls_per_day_per_port = Column(Integer, nullable=False)
+
+    max_calls_per_day_per_port = Column(Integer, nullable=False, default=3)

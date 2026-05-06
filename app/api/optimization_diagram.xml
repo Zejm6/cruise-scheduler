@@ -1,0 +1,70 @@
+<mxfile host="app.diagrams.net" modified="2025-12-03T10:00:00.000Z" agent="5.0" version="20.3.0">
+  <diagram id="OptFlowDiagram" name="Optimization Flow">
+    <mxGraphModel dx="1000" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- Ulazni podaci -->
+        <mxCell id="in1" value="Ulazni podaci&#10;• Zahtjevi brodova&#10;• Luke&#10;• Pravila (RuleSet)&#10;• Vremenski opseg"
+                style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;"
+                vertex="1" parent="1">
+          <mxGeometry x="180" y="60" width="200" height="120" as="geometry"/>
+        </mxCell>
+
+        <!-- Strelica 1 -->
+        <mxCell id="arrow1" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;strokeColor=#6c8ebf;"
+                edge="1" parent="1" source="in1" target="prep1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Validacija i priprema -->
+        <mxCell id="prep1" value="Validacija i priprema&#10;• Provjera podataka&#10;• Filtriranje po datumu&#10;• Usklađivanje sa pravilima"
+                style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;"
+                vertex="1" parent="1">
+          <mxGeometry x="180" y="230" width="220" height="120" as="geometry"/>
+        </mxCell>
+
+        <!-- Strelica 2 -->
+        <mxCell id="arrow2" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;strokeColor=#9673a6;"
+                edge="1" parent="1" source="prep1" target="ilp1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- ILP Optimizer -->
+        <mxCell id="ilp1" value="ILP Optimizator&#10;• Definicija varijabli&#10;• Ograničenja kapaciteta&#10;• Ograničenja dužine/gaza&#10;• Ciljna funkcija"
+                style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;"
+                vertex="1" parent="1">
+          <mxGeometry x="180" y="400" width="240" height="140" as="geometry"/>
+        </mxCell>
+
+        <!-- Strelica 3 -->
+        <mxCell id="arrow3" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;strokeColor=#d79b00;"
+                edge="1" parent="1" source="ilp1" target="out1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Rezultat optimizacije -->
+        <mxCell id="out1" value="Rezultat optimizacije&#10;• Optimalni raspored&#10;• KPI metrike&#10;• Validacija rezultata"
+                style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;"
+                vertex="1" parent="1">
+          <mxGeometry x="180" y="580" width="220" height="120" as="geometry"/>
+        </mxCell>
+
+        <!-- Strelica 4 -->
+        <mxCell id="arrow4" style="edgeStyle=orthogonalEdgeStyle;endArrow=block;html=1;strokeColor=#82b366;"
+                edge="1" parent="1" source="out1" target="ui1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Frontend prikaz -->
+        <mxCell id="ui1" value="Frontend prikaz&#10;• Tabela rasporeda&#10;• KPI prikaz&#10;• Interaktivno uređivanje"
+                style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;"
+                vertex="1" parent="1">
+          <mxGeometry x="180" y="750" width="220" height="120" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
